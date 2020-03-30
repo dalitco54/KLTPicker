@@ -1,6 +1,7 @@
 import numpy as np
 from pyfftw.interfaces.numpy_fft import fft2, ifft2
 from pyfftw import FFTW
+from numpy.polynomial.legendre import leggauss
 
 
 def crop(x, out_shape):
@@ -54,6 +55,7 @@ def downsample(stack, n, mask=None, stack_in_fourier=False):
             print('finished {}/{}'.format(batch[-1] + 1, num_images))
     return output
 
+
 def cfft2(x, axes=(-1, -2)):
     if len(x.shape) == 2:
         return np.fft.fftshift(np.transpose(np.fft.fft2(np.transpose(np.fft.ifftshift(x)))))
@@ -71,7 +73,7 @@ def icfft2(x, axes=(-1, -2)):
         return np.fft.fftshift(np.transpose(np.fft.ifft2(np.transpose(np.fft.ifftshift(x)))))
     elif len(x.shape) == 3:
         y = np.fft.ifftshift(x, axes=axes)
-        y = np.fft.ifft2(y, axes=axes)
+        y = ifft2(y, axes=axes)
         y = np.fft.fftshift(y, axes=axes)
         return y
     else:
@@ -84,11 +86,11 @@ def icfft(x, axis=0):
 
 def fast_cfft2(x, axes=(-1, -2)):
     if len(x.shape) == 2:
-        return fftshift(np.transpose(fft2(np.transpose(ifftshift(x)))))
+        return np.fft.fftshift(np.transpose(fft2(np.transpose(np.fft.ifftshift(x)))))
     elif len(x.shape) == 3:
-        y = ifftshift(x, axes=axes)
+        y = np.fft.ifftshift(x, axes=axes)
         y = fft2(y, axes=axes)
-        y = fftshift(y, axes=axes)
+        y = np.fft.fftshift(y, axes=axes)
         return y
     else:
         raise ValueError("x must be 2D or 3D")
@@ -96,12 +98,12 @@ def fast_cfft2(x, axes=(-1, -2)):
 
 def fast_icfft2(x, axes=(-1, -2)):
     if len(x.shape) == 2:
-        return fftshift(np.transpose(ifft2(np.transpose(ifftshift(x)))))
+        return np.fft.fftshift(np.transpose(ifft2(np.transpose(np.fft.ifftshift(x)))))
 
     elif len(x.shape) == 3:
-        y = ifftshift(x, axes=axes)
+        y = np.fft.ifftshift(x, axes=axes)
         y = ifft2(y, axes=axes)
-        y = fftshift(y, axes=axes)
+        y = np.fft.fftshift(y, axes=axes)
         return y
 
     else:
@@ -124,53 +126,8 @@ def lgwt(n, a, b):
     x = m * x1 + c
     w = m * w
     x = np.flipud(x)
-    return create_struct({'x': x, 'w': w})
+    return x, w
 
-def fill_struct(obj=None, att_vals=None, overwrite=None):
-    """
-    Fill object with attributes in a dictionary.
-    If a struct is not given a new object will be created and filled.
-    If the given struct has a field in att_vals, the original field will stay, unless specified otherwise in overwrite.
-    att_vals is a dictionary with string keys, and for each key:
-    if hasattr(s, key) and key in overwrite:
-        pass
-    else:
-        setattr(s, key, att_vals[key])
-    :param obj:
-    :param att_vals:
-    :param overwrite
-    :return:
-    """
-    if obj is None:
-        class DisposableObject:
-            pass
-
-        obj = DisposableObject()
-
-    if att_vals is None:
-        return obj
-
-    if overwrite is None or not overwrite:
-        overwrite = []
-    if overwrite is True:
-        overwrite = list(att_vals.keys())
-
-    for key in att_vals.keys():
-        if hasattr(obj, key) and key not in overwrite:
-            continue
-        else:
-            setattr(obj, key, att_vals[key])
-
-    return obj
-
-
-def create_struct(att_vals=None):
-    """
-    Creates object
-    :param att_vals:
-    :return:
-    """
-    return fill_struct(att_vals=att_vals)
 
 def cryo_epsds(imstack, samples_idx, max_d):
     p = imstack.shape[0]
@@ -232,8 +189,8 @@ def cryo_epsdr(vol, samples_idx, max_d):
     mask[samples_idx] = 1
     tmp = np.zeros((2 * p + 1, 2 * p + 1))
     tmp[:p, :p] = mask
-    ftmp = np.fft.fft2(tmp)
-    c = np.fft.ifft2(ftmp * np.conj(ftmp))
+    ftmp = fft2(tmp)
+    c = ifft2(ftmp * np.conj(ftmp))
     c = c[:max_d+1, :max_d+1]
     c = np.round(c.real).astype('int')
 
@@ -319,3 +276,76 @@ def bsearch(x, lower_bound, upper_bound):
         return None, None
 
     return lower_idx, upper_idx
+
+
+def cryo_prewhiten(proj, noise_response, rel_threshold=None):
+    """
+    Pre-whiten a stack of projections using the power spectrum of the noise.
+
+
+    :param proj: stack of images/projections
+    :param noise_response: 2d image with the power spectrum of the noise. If all
+                           images are to be whitened with respect to the same power spectrum,
+                           this is a single image. If each image is to be whitened with respect
+                           to a different power spectrum, this is a three-dimensional array with
+                           the same number of 2d slices as the stack of images.
+
+    :param rel_threshold: The relative threshold used to determine which frequencies
+                          to whiten and which to set to zero. If empty (the default)
+                          all filter values less than 100*eps(class(proj)) are
+                          zeroed out, while otherwise, all filter values less than
+                          threshold times the maximum filter value for each filter
+                          is set to zero.
+
+    :return: Pre-whitened stack of images.
+    """
+
+    delta = np.finfo(proj.dtype).eps
+
+    L1, L2, num_images = proj.shape
+    l1 = L1 // 2
+    l2 = L2 // 2
+    K1, K2 = noise_response.shape
+    k1 = int(np.ceil(K1 / 2))
+    k2 = int(np.ceil(K2 / 2))
+
+    filter_var = np.sqrt(noise_response)
+    filter_var /= np.linalg.norm(filter_var)
+
+    filter_var = (filter_var + np.flipud(filter_var)) / 2
+    filter_var = (filter_var + np.fliplr(filter_var)) / 2
+
+    if rel_threshold is None:
+        nzidx = np.where(filter_var > 100 * delta)
+    else:
+        raise NotImplementedError('not implemented for rel_threshold != None')
+
+    fnz = filter_var[nzidx]
+    one_over_fnz = 1 / fnz
+
+    # matrix with 1/fnz in nzidx, 0 elsewhere
+    one_over_fnz_as_mat = np.zeros((noise_response.shape[0], noise_response.shape[1]))
+    one_over_fnz_as_mat[nzidx] += one_over_fnz
+    pp = np.zeros((noise_response.shape[0], noise_response.shape[1]))
+    p2 = np.zeros((num_images, L1, L2), dtype='complex128')
+    proj = proj.transpose((2, 0, 1)).copy()
+
+    row_start_idx = k1 - l1 - 1
+    row_end_idx = k1 + l1
+    col_start_idx = k2 - l2 - 1
+    col_end_idx = k2 + l2
+
+    if L1 % 2 == 0 and L2 % 2 == 0:
+        row_end_idx -= 1
+        col_end_idx -= 1
+
+    for i in range(num_images):
+        pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = proj[i]
+        fp = fast_cfft2(pp)
+        fp *= one_over_fnz_as_mat
+        pp2 = fast_icfft2(fp)
+        p2[i] = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx])
+
+    # change back to x,y,z convention
+    proj = p2.real.transpose((1, 2, 0)).copy()
+    return proj, filter_var, nzidx

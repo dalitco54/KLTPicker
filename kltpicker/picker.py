@@ -2,15 +2,16 @@ import mrcfile
 import numpy as np
 import scipy.special as ssp
 import glob
-from cryo_utils import downsample, lgwt
-from micrograph import Micrograph
+from .cryo_utils import downsample, lgwt
+from .micrograph import Micrograph
 
 # Globals:
-EPS = 10 ** (-2) #Convergence term for ALS.
+EPS = 10 ** (-2)  # Convergence term for ALS.
 PERCENT_EIG_FUNC = 0.99
-NUM_QUAD_NYS = 2**10
-NUM_QUAD_KER = 2**10
+NUM_QUAD_NYS = 2 ** 10
+NUM_QUAD_KER = 2 ** 10
 MAX_FUN = 400
+
 
 class Picker:
     """
@@ -67,6 +68,7 @@ class Picker:
     get_micrographs()
         Reads .mrc files, downsamples them and adds them to the KLTpicker object.
     """
+
     def __init__(self, args):
         self.particle_size = args.particle_size
         self.input_dir = args.input_dir
@@ -74,7 +76,7 @@ class Picker:
         self.output_noise = '%s/PickedNoise_ParticleSize_%d' % (args.output_dir, args.particle_size)
         self.output_particles = '%s/PickedParticles_ParticleSize_%d' % (args.output_dir, args.particle_size)
         self.gpu_use = args.gpu_use
-        self.mgscale = 100/args.particle_size
+        self.mgscale = 100 / args.particle_size
         self.max_order = args.max_order
         self.micrographs = np.array([])
         self.quad_ker = 0
@@ -106,20 +108,16 @@ class Picker:
     def preprocess(self):
         """Initializes parameters."""
         radmax = np.floor((self.patch_size_func - 1) / 2)
-        x = np.arange(-radmax, radmax+1, 1).astype('float64')
+        x = np.arange(-radmax, radmax + 1, 1).astype('float64')
         X, Y = np.meshgrid(x, x)
         rad_mat = np.sqrt(np.square(X) + np.square(Y))
         rsamp = rad_mat.transpose().flatten()
         self.rsamp_length = rsamp.size
         theta = np.arctan2(Y, X).transpose().flatten()
-        quad_ker_sample_points = lgwt(NUM_QUAD_KER, 0, np.pi)
-        rho = quad_ker_sample_points.x
-        quad_ker = quad_ker_sample_points.w
+        rho, quad_ker = lgwt(NUM_QUAD_KER, 0, np.pi)
         rho = np.flipud(rho.astype('float64'))
         quad_ker = np.flipud(quad_ker.astype('float64'))
-        quad_nys_sample_points = lgwt(NUM_QUAD_NYS, 0, radmax)
-        r = quad_nys_sample_points.x
-        quad_nys = quad_nys_sample_points.w
+        r, quad_nys = lgwt(NUM_QUAD_NYS, 0, radmax)
         r = np.flipud(r.astype('float64'))
         quad_nys = np.flipud(quad_nys.astype('float64'))
         r_r = np.outer(r, r)
@@ -162,9 +160,9 @@ class Picker:
                 data = data[0:-1, :]
             if np.mod(data.shape[1], 2) == 0:  # Odd size is needed.
                 data = data[:, 0:-1]
-            pic = data   # For figures before standardization.
+            pic = data  # For figures before standardization.
             data = data - np.mean(data.transpose().flatten())
-            data = data/np.linalg.norm(data, 'fro')
+            data = data / np.linalg.norm(data, 'fro')
             mc_size = data.shape
             micrograph = Micrograph(data, pic, mc_size, mrc_file.split('/')[-1], mrc_size)
             micrographs.append(micrograph)
