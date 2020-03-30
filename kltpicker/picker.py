@@ -5,7 +5,14 @@ import glob
 from cryo_utils import downsample, lgwt
 from micrograph import Micrograph
 
-class KLTPicker:
+# Globals:
+EPS = 10 ** (-2) #Convergence term for ALS.
+PERCENT_EIG_FUNC = 0.99
+NUM_QUAD_NYS = 2**10
+NUM_QUAD_KER = 2**10
+MAX_FUN = 400
+
+class Picker:
     """
     KLTpicker object that holds all variables that are used in the computations.
 
@@ -141,7 +148,7 @@ class KLTPicker:
         self.rad_mat = rad_mat
 
     def get_micrographs(self):
-        """Reads .mrc files, downsamples them and adds them to the KLTpicker object."""
+        """Reads .mrc files, downsamples them and adds them to the Picker object."""
         micrographs = []
         mrc_files = glob.glob("%s/*.mrc" % self.input_dir)
         for mrc_file in mrc_files:

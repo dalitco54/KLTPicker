@@ -1,13 +1,7 @@
 import argparse
 import matplotlib.pyplot as plt
-
-# GLOBALS
-EPS = 10 ** (-2) #Convergence term for ALS.
-PERCENT_EIG_FUNC = 0.99
-NUM_QUAD_NYS = 2**10
-NUM_QUAD_KER = 2**10
-MAX_FUN = 400
-
+import numpy as np
+from picker import Picker
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -31,7 +25,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    kltpicker = KLTPicker(args)
+    kltpicker = Picker(args)
     print("Starting preprocessing.")
     kltpicker.preprocess()
     # get_matlab_files_preprocess(kltpicker)

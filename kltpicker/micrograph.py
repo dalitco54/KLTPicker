@@ -1,10 +1,16 @@
 import numpy as np
+from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, als_find_min
 from scipy import signal
-from util import f_trans_2, stdfilter, trig_interpolation,
-from scipy import signal
-from scipy.ndimage import correlate, uniform_filter
+from scipy.ndimage import correlate
 from numpy.matlib import repmat
-from cryo_utils import lgwt
+from .cryo_utils import lgwt
+
+# Globals:
+EPS = 10 ** (-2) #Convergence term for ALS.
+PERCENT_EIG_FUNC = 0.99
+NUM_QUAD_NYS = 2**10
+NUM_QUAD_KER = 2**10
+MAX_FUN = 400
 
 class Micrograph:
     """
@@ -101,7 +107,7 @@ class Micrograph:
             row = np.ceil((k+1) / m).astype(int)
             col = (k+1 - (row - 1) * m).astype(int)
             noisemc_block = self.noise_mc[(row - 1) * patch_size.astype(int):row * patch_size.astype(int), (col - 1) * patch_size.astype(int): col * patch_size.astype(int)]
-            noisemc_block = noisemc_block- np.mean(noisemc_block)
+            noisemc_block = noisemc_block - np.mean(noisemc_block)
             psd_block = cryo_epsds(noisemc_block[:, :, np.newaxis], np.where(np.zeros((int(patch_size), int(patch_size))) == 0), np.floor(0.3 * patch_size).astype(int))
             psd_block = psd_block[0]
             if np.count_nonzero(np.isnan(psd_block)) != 0:
@@ -164,14 +170,14 @@ class Micrograph:
         Row, Col = np.meshgrid(row, col)
         rad_mat = np.sqrt(Col ** 2 + Row ** 2)
         rad_samp, idx = np.unique(rad_mat, return_inverse=True)
-        rad_samp_tmp = rad_samp[rad_samp<np.max(self.r*np.pi)]
+        rad_samp_tmp = rad_samp[rad_samp < np.max(self.r * np.pi)]
         noise_psd_nodes = np.abs(trig_interpolation(self.r * np.pi, self.approx_noise_psd, rad_samp_tmp))
         noise_psd_nodes = np.pad(noise_psd_nodes, (0, rad_samp.size - noise_psd_nodes.size), 'constant', constant_values=noise_psd_nodes[-1])
         noise_psd_mat = np.reshape(noise_psd_nodes[idx], [col.size, row.size])
         noise_mc_prewhite = cryo_prewhiten(self.noise_mc[:, :, np.newaxis], noise_psd_mat)
         noise_mc_prewhite = noise_mc_prewhite[0][:, :, 0]
         noise_mc_prewhite = noise_mc_prewhite - np.mean(noise_mc_prewhite)
-        noise_mc_prewhite = noise_mc_prewhite/np.linalg.norm(noise_mc_prewhite, 'fro')
+        noise_mc_prewhite = noise_mc_prewhite / np.linalg.norm(noise_mc_prewhite, 'fro')
         self.noise_mc = noise_mc_prewhite
 
     def construct_klt_templates(self, kltpicker):
@@ -179,7 +185,7 @@ class Micrograph:
         eig_func_tot = np.zeros((NUM_QUAD_NYS, NUM_QUAD_NYS, kltpicker.max_order))
         eig_val_tot = np.zeros((NUM_QUAD_NYS, kltpicker.max_order))
         sqrt_rr = np.sqrt(kltpicker.r_r)
-        d_rho_psd_quad_ker = np.diag(kltpicker.rho)*np.diag(self.psd)*np.diag(kltpicker.quad_ker)
+        d_rho_psd_quad_ker = np.diag(kltpicker.rho) * np.diag(self.psd) * np.diag(kltpicker.quad_ker)
         sqrt_diag_quad_nys = np.sqrt(np.diag(kltpicker.quad_nys))
         for n in range(kltpicker.max_order):
             h_nodes = sqrt_rr*(kltpicker.j_r_rho[:, :, n] @ d_rho_psd_quad_ker @ kltpicker.j_r_rho[:, :, n])

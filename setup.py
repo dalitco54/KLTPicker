@@ -16,5 +16,6 @@ setup(name='kltpicker',
           'scipy',
           'matplotlib',
           'os',
+          'pyfftw'
       ],
       zip_safe=False)
