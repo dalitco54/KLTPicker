@@ -2,6 +2,7 @@ import numpy as np
 from pyfftw.interfaces.numpy_fft import fft2, ifft2
 from pyfftw import FFTW
 from numpy.polynomial.legendre import leggauss
+import operator as op
 
 
 def crop(x, out_shape):
@@ -52,7 +53,6 @@ def downsample(stack, n, mask=None, stack_in_fourier=False):
             curr_batch = curr_batch if stack_in_fourier else fft2(curr_batch)
             fx = crop(np.fft.fftshift(curr_batch, axes=(-2, -1)), (-1, n, n)) * mask
             output[batch] = ifft2(np.fft.ifftshift(fx, axes=(-2, -1))) * (size_out / size_in)
-            print('finished {}/{}'.format(batch[-1] + 1, num_images))
     return output
 
 
@@ -132,7 +132,7 @@ def lgwt(n, a, b):
 def cryo_epsds(imstack, samples_idx, max_d):
     p = imstack.shape[0]
     if max_d >= p:
-        max_d = p-1
+        max_d = p - 1
         print('max_d too large. Setting max_d to {}'.format(max_d))
 
     r, x, _ = cryo_epsdr(imstack, samples_idx, max_d)
@@ -143,8 +143,8 @@ def cryo_epsds(imstack, samples_idx, max_d):
         for j in range(-max_d, max_d + 1):
             d = i ** 2 + j ** 2
             if d <= max_d ** 2:
-                idx, _ = bsearch(dsquare, d*(1-1e-13), d*(1+1e-13))
-                r2[i+p-1, j+p-1] = r[idx-1]
+                idx, _ = bsearch(dsquare, d * (1 - 1e-13), d * (1 + 1e-13))
+                r2[i + p - 1, j + p - 1] = r[idx - 1]
 
     w = gwindow(p, max_d)
     p2 = fast_cfft2(r2 * w)
@@ -191,7 +191,7 @@ def cryo_epsdr(vol, samples_idx, max_d):
     tmp[:p, :p] = mask
     ftmp = fft2(tmp)
     c = ifft2(ftmp * np.conj(ftmp))
-    c = c[:max_d+1, :max_d+1]
+    c = c[:max_d + 1, :max_d + 1]
     c = np.round(c.real).astype('int')
 
     r = np.zeros(len(corrs))
@@ -203,17 +203,17 @@ def cryo_epsdr(vol, samples_idx, max_d):
     input_ifft2 = np.zeros((2 * p + 1, 2 * p + 1), dtype='complex128')
     output_ifft2 = np.zeros((2 * p + 1, 2 * p + 1), dtype='complex128')
     flags = ('FFTW_MEASURE', 'FFTW_UNALIGNED')
-    fft2 = FFTW(input_fft2, output_fft2, axes=(0, 1), direction='FFTW_FORWARD', flags=flags)
-    ifft2 = FFTW(input_ifft2, output_ifft2, axes=(0, 1), direction='FFTW_BACKWARD', flags=flags)
+    a_fft2 = FFTW(input_fft2, output_fft2, axes=(0, 1), direction='FFTW_FORWARD', flags=flags)
+    a_ifft2 = FFTW(input_ifft2, output_ifft2, axes=(0, 1), direction='FFTW_BACKWARD', flags=flags)
     sum_s = np.zeros(output_ifft2.shape, output_ifft2.dtype)
     sum_c = c * vol.shape[0]
     for i in range(k):
         proj = vol[i]
 
         input_fft2[samples_idx] = proj[samples_idx]
-        fft2()
+        a_fft2()
         np.multiply(output_fft2, np.conj(output_fft2), out=input_ifft2)
-        ifft2()
+        a_ifft2()
         sum_s += output_ifft2
 
     for curr_dist in zip(valid_dists[0], valid_dists[1]):
@@ -232,7 +232,7 @@ def cryo_epsdr(vol, samples_idx, max_d):
 
 
 def gwindow(p, max_d):
-    x, y = np.meshgrid(np.arange(-(p-1), p), np.arange(-(p-1), p))
+    x, y = np.meshgrid(np.arange(-(p - 1), p), np.arange(-(p - 1), p))
     alpha = 3.0
     w = np.exp(-alpha * (np.square(x) + np.square(y)) / (2 * max_d ** 2))
     return w
@@ -248,7 +248,7 @@ def bsearch(x, lower_bound, upper_bound):
 
     while lower_idx_a + 1 < lower_idx_b or upper_idx_a + 1 < upper_idx_b:
         lw = int(np.floor((lower_idx_a + lower_idx_b) / 2))
-        if x[lw-1] >= lower_bound:
+        if x[lw - 1] >= lower_bound:
             lower_idx_b = lw
         else:
             lower_idx_a = lw
@@ -256,18 +256,18 @@ def bsearch(x, lower_bound, upper_bound):
                 upper_idx_a = lw
 
         up = int(np.ceil((upper_idx_a + upper_idx_b) / 2))
-        if x[up-1] <= upper_bound:
+        if x[up - 1] <= upper_bound:
             upper_idx_a = up
         else:
             upper_idx_b = up
             if lower_idx_a < up < lower_idx_b:
                 lower_idx_b = up
 
-    if x[lower_idx_a-1] >= lower_bound:
+    if x[lower_idx_a - 1] >= lower_bound:
         lower_idx = lower_idx_a
     else:
         lower_idx = lower_idx_b
-    if x[upper_idx_b-1] <= upper_bound:
+    if x[upper_idx_b - 1] <= upper_bound:
         upper_idx = upper_idx_b
     else:
         upper_idx = upper_idx_a
@@ -349,3 +349,133 @@ def cryo_prewhiten(proj, noise_response, rel_threshold=None):
     # change back to x,y,z convention
     proj = p2.real.transpose((1, 2, 0)).copy()
     return proj, filter_var, nzidx
+
+
+def als_find_min(sreal, eps, max_iter):
+    """
+    ALS method for RPSD factorization.
+
+    Approximate Clean and Noise PSD and the particle location vector alpha.
+    :param sreal: PSD matrix to be factorized
+    :param eps: Convergence term
+    :param max_iter: Maximum iterations
+    :return approx_clean_psd: Approximated clean PSD
+    :return approx_noise_psd: Approximated noise PSD
+    :return alpha_approx: Particle location vector alpha.
+    :return stop_par: Stop algorithm if an error occurred.
+    """
+    sz = sreal.shape
+    patch_num = sz[1]
+    One = np.ones(patch_num)
+    s_norm_inf = np.apply_along_axis(lambda x: max(np.abs(x)), 0, sreal)
+    max_col = np.argmax(s_norm_inf)
+    min_col = np.argmin(s_norm_inf)
+    clean_sig_tmp = np.abs(sreal[:, max_col] - sreal[:, min_col])
+    s_norm_1 = np.apply_along_axis(lambda x: sum(np.abs(x)), 0, sreal)
+    min_col = np.argmin(s_norm_1)
+    noise_sig_tmp = np.abs(sreal[:, min_col])
+    s = sreal - np.outer(noise_sig_tmp, One)
+    alpha_tmp = (np.dot(clean_sig_tmp, s)) / np.sum(clean_sig_tmp ** 2)
+    alpha_tmp = alpha_tmp.clip(min=0, max=1)
+    stop_par = 0
+    cnt = 1
+    while stop_par == 0:
+        if np.linalg.norm(alpha_tmp, 1) == 0:
+            alpha_tmp = np.random.random(alpha_tmp.size)
+        approx_clean_psd = np.dot(s, alpha_tmp) / sum(alpha_tmp ** 2)
+        approx_clean_psd = approx_clean_psd.clip(min=0, max=None)
+        s = sreal - np.outer(approx_clean_psd, alpha_tmp)
+        approx_noise_psd = np.dot(s, np.ones(patch_num)) / patch_num
+        approx_noise_psd = approx_noise_psd.clip(min=0, max=None)
+        s = sreal - np.outer(approx_noise_psd, One)
+        if np.linalg.norm(approx_clean_psd, 1) == 0:
+            approx_clean_psd = np.random.random(approx_clean_psd.size)
+        alpha_approx = np.dot(approx_clean_psd, s) / sum(approx_clean_psd ** 2)
+        alpha_approx = alpha_approx.clip(min=0, max=1)
+        if np.linalg.norm(noise_sig_tmp - approx_noise_psd) / np.linalg.norm(approx_noise_psd) < eps:
+            if np.linalg.norm(clean_sig_tmp - approx_clean_psd) / np.linalg.norm(approx_clean_psd) < eps:
+                if np.linalg.norm(alpha_approx - alpha_tmp) / np.linalg.norm(alpha_approx) < eps:
+                    break
+        noise_sig_tmp = approx_noise_psd
+        alpha_tmp = alpha_approx
+        clean_sig_tmp = approx_clean_psd
+        cnt += 1
+        if cnt > max_iter:
+            stop_par = 1
+            break
+    return approx_clean_psd, approx_noise_psd, alpha_approx, stop_par
+
+def picking_from_scoring_mat(log_test_n, mrc_name, kltpicker, mg_big_size):
+    idx_row = np.arange(log_test_n.shape[0])
+    idx_col = np.arange(log_test_n.shape[1])
+    [col_idx, row_idx] = np.meshgrid(idx_col, idx_row)
+    r_del = np.floor(kltpicker.patch_size_pick_box)
+    shape = log_test_n.shape
+    scoring_mat = log_test_n
+    if kltpicker.num_of_particles == -1:
+        num_picked_particles = write_output_files(scoring_mat, shape, r_del, np.iinfo(np.int32(10)).max, op.gt,
+                                                  kltpicker.threshold + 1, kltpicker.threshold,
+                                                  kltpicker.patch_size_func,
+                                                  row_idx, col_idx, kltpicker.output_particles, mrc_name,
+                                                  kltpicker.mgscale, mg_big_size, -np.inf,
+                                                  kltpicker.patch_size_pick_box)
+    else:
+        num_picked_particles = write_output_files(scoring_mat, shape, r_del, kltpicker.num_of_particles, op.gt,
+                                                  kltpicker.threshold + 1, kltpicker.threshold,
+                                                  kltpicker.patch_size_func,
+                                                  row_idx, col_idx, kltpicker.output_particles, mrc_name,
+                                                  kltpicker.mgscale, mg_big_size, -np.inf,
+                                                  kltpicker.patch_size_pick_box)
+    if kltpicker.num_of_noise_images != 0:
+        num_picked_noise = write_output_files(scoring_mat, shape, r_del, kltpicker.num_of_noise_images, op.lt,
+                                              kltpicker.threshold - 1, kltpicker.threshold, kltpicker.patch_size_func,
+                                              row_idx, col_idx, kltpicker.output_noise, mrc_name,
+                                              kltpicker.mgscale, mg_big_size, np.inf, kltpicker.patch_size_pick_box)
+    else:
+        num_picked_noise = 0
+    return num_picked_particles, num_picked_noise
+
+
+def write_output_files(scoring_mat, shape, r_del, max_iter, oper, oper_param, threshold, patch_size_func, row_idx,
+                       col_idx, output_path, mrc_name, mgscale, mg_big_size, replace_param, patch_size_pick_box):
+    num_picked = 0
+    box_path = output_path / 'box'
+    star_path = output_path / 'star'
+    if not output_path.exists():
+        output_path.mkdir()
+    if not box_path.exists():
+        box_path.mkdir()
+    if not star_path.exists():
+        star_path.mkdir()
+    box_file = open(box_path / mrc_name.replace('.mrc', '.box'), 'w')
+    star_file = open(star_path / mrc_name.replace('.mrc', '.star'), 'w')
+    star_file.write('data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n')
+    iter_pick = 0
+    log_max = np.max(scoring_mat)
+    while iter_pick <= max_iter and oper(oper_param, threshold):
+        max_index = np.argmax(scoring_mat.transpose().flatten())
+        oper_param = scoring_mat.transpose().flatten()[max_index]
+        if not oper(oper_param, threshold):
+            break
+        else:
+            [index_col, index_row] = np.unravel_index(max_index, shape)
+            ind_row_patch = (index_row - 1) + patch_size_func
+            ind_col_patch = (index_col - 1) + patch_size_func
+            row_idx_b = row_idx - index_row
+            col_idx_b = col_idx - index_col
+            rsquare = row_idx_b ** 2 + col_idx_b ** 2
+            scoring_mat[rsquare <= (r_del ** 2)] = replace_param
+            box_file.write(
+                '%i\t%i\t%i\t%i\n' % ((1 / mgscale) * (ind_col_patch + 1 - np.floor(patch_size_pick_box / 2)),
+                                      (mg_big_size[0] + 1) - (1 / mgscale) * (
+                                                  ind_row_patch + 1 + np.floor(patch_size_pick_box / 2)),
+                                      (1 / mgscale) * patch_size_pick_box, (1 / mgscale) * patch_size_pick_box))
+            star_file.write('%i\t%i\t%f\n' % (
+            (1 / mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / mgscale) * (ind_row_patch + 1)),
+            oper_param / log_max))
+            iter_pick += 1
+            num_picked += 1
+    star_file.close()
+    box_file.close()
+    return num_picked
+

@@ -1,9 +1,10 @@
 import mrcfile
+from pathlib import Path
 import numpy as np
 import scipy.special as ssp
-import glob
 from .cryo_utils import downsample, lgwt
 from .micrograph import Micrograph
+from multiprocessing import Pool
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -13,7 +14,7 @@ NUM_QUAD_KER = 2 ** 10
 MAX_FUN = 400
 
 
-class Picker:
+class KLTPicker:
     """
     KLTpicker object that holds all variables that are used in the computations.
 
@@ -71,10 +72,10 @@ class Picker:
 
     def __init__(self, args):
         self.particle_size = args.particle_size
-        self.input_dir = args.input_dir
-        self.output_dir = args.output_dir
-        self.output_noise = '%s/PickedNoise_ParticleSize_%d' % (args.output_dir, args.particle_size)
-        self.output_particles = '%s/PickedParticles_ParticleSize_%d' % (args.output_dir, args.particle_size)
+        self.input_dir = Path(args.input_dir)
+        self.output_dir = Path(args.output_dir)
+        self.output_noise = self.output_dir / ('PickedNoise_ParticleSize_%d' % args.particle_size)
+        self.output_particles = self.output_dir / ('PickedParticles_ParticleSize_%d' % args.particle_size)
         self.gpu_use = args.gpu_use
         self.mgscale = 100 / args.particle_size
         self.max_order = args.max_order
@@ -92,7 +93,7 @@ class Picker:
         self.num_of_particles = args.num_of_particles
         self.num_of_noise_images = args.num_of_noise_images
         self.threshold = args.threshold
-        self.show_figures = args.show_figures
+        self.show_figures = 0  # args.show_figures
         patch_size = np.floor(0.8 * self.mgscale * args.particle_size)  # need to put the 0.8 somewhere else.
         if np.mod(patch_size, 2) == 0:
             patch_size -= 1
@@ -124,16 +125,18 @@ class Picker:
         r_rho = np.outer(r, rho)
         rsamp_r = np.outer(np.ones(len(rsamp)), r)
         rsamp_rho = np.outer(rsamp, rho)
-        j_r_rho = np.zeros([NUM_QUAD_KER, NUM_QUAD_NYS, self.max_order]).astype('float64')
-        j_samp = np.zeros([len(rsamp), NUM_QUAD_NYS, self.max_order]).astype('float64')
-        cosine = np.zeros([len(theta), self.max_order]).astype('float64')
-        sine = np.zeros([len(theta), self.max_order]).astype('float64')
-        for n in range(self.max_order):
-            j_r_rho[:, :, n] = ssp.jv(n, r_rho).astype('float64')
-            j_samp[:, :, n] = ssp.jv(n, rsamp_rho).astype('float64')
-            if n != 0:
-                cosine[:, n] = np.cos(n * theta).astype('float64')
-                sine[:, n] = np.sin(n * theta).astype('float64')
+        pool = Pool()
+        res_j_r_rho = pool.starmap(ssp.jv, [(n, r_rho) for n in range(self.max_order)])
+        res_j_samp = pool.starmap(ssp.jv, [(n, rsamp_rho) for n in range(self.max_order)])
+        res_cosine = pool.map(np.cos, [n * theta for n in range(self.max_order)])
+        res_sine = pool.map(np.sin, [n * theta for n in range(self.max_order)])
+        pool.close()
+        pool.join()
+        j_r_rho = np.squeeze(res_j_r_rho).transpose((1, 2, 0))
+        j_samp = np.squeeze(res_j_samp).transpose((1, 2, 0))
+        cosine = np.squeeze(res_cosine).transpose()
+        sine = np.squeeze(res_sine).transpose()
+        cosine[:, 0] = 0
         self.quad_ker = quad_ker
         self.quad_nys = quad_nys
         self.rho = rho
@@ -148,7 +151,7 @@ class Picker:
     def get_micrographs(self):
         """Reads .mrc files, downsamples them and adds them to the Picker object."""
         micrographs = []
-        mrc_files = glob.glob("%s/*.mrc" % self.input_dir)
+        mrc_files = self.input_dir.glob("*.mrc")
         for mrc_file in mrc_files:
             mrc = mrcfile.open(mrc_file)
             mrc_data = mrc.data.astype('float64').transpose()
@@ -164,7 +167,7 @@ class Picker:
             data = data - np.mean(data.transpose().flatten())
             data = data / np.linalg.norm(data, 'fro')
             mc_size = data.shape
-            micrograph = Micrograph(data, pic, mc_size, mrc_file.split('/')[-1], mrc_size)
+            micrograph = Micrograph(data, pic, mc_size, mrc_file.name, mrc_size)
             micrographs.append(micrograph)
         micrographs = np.array(micrographs)
         self.micrographs = micrographs
