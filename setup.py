@@ -1,21 +1,28 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
-setup(name='kltpicker', 
+setup(name='kltpicker',
       version='0.1',
       description='KLT picker',
       url='http://github.com/dalitco54/kltpicker',
       author='Dalit Cohen',
       author_email='dalitcohen@mail.tau.ac.il',
-      packages=['kltpicker'],
+      packages=find_packages(),
+      license='MIT',
       install_requires=[
           'numpy',
           'mrcfile',
           'operator',
-          'glob',
+          'multiprocessing',
+          'pathlib',
+          'warnings',
+          'sys',
           'argparse',
           'scipy',
           'matplotlib',
           'os',
-          'pyfftw'
+          'pyfftw',
+          'tqdm'
       ],
+      python_requires='>=3',
+      scripts=['bin/pick.py'],
       zip_safe=False)

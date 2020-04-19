@@ -4,6 +4,7 @@ from scipy import signal
 from tqdm import tqdm
 from numpy.matlib import repmat
 from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_mat
+from scipy.linalg import eigh
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.

@@ -2,22 +2,12 @@
 
 from pathlib import Path
 import warnings
-from pyfftw import FFTW
 from sys import exit
 import argparse
 #import matplotlib.pyplot as plt
-import mrcfile
 import numpy as np
-import scipy.special as ssp
-from numpy.matlib import repmat
-from numpy.polynomial.legendre import leggauss
-from pyfftw.interfaces.numpy_fft import fft2, ifft2
-from scipy import signal
-from scipy.fftpack import fftshift
-from scipy.ndimage import uniform_filter
-from tqdm import tqdm
-from multiprocessing import Pool
-from scipy.linalg import eigh
+from kltpicker.kltpicker import KLTPicker
+from kltpicker.util import trig_interpolation
 warnings.filterwarnings("ignore")
 
 # Globals:
@@ -50,8 +40,6 @@ def parse_args():
     parser.add_argument('--preprocess', action='store_false', help='Do not run preprocessing.', default=True)
     args = parser.parse_args()
     return args
-
-
 
 
 def main():

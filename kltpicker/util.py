@@ -2,7 +2,6 @@ import numpy as np
 from scipy import signal
 from scipy.ndimage import uniform_filter
 from scipy.fftpack import fftshift
-from scipy.signal import fftconvolve
 
 
 def fftcorrelate(image, filt):
