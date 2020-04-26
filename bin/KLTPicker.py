@@ -79,7 +79,7 @@ def main():
     with Pool() as pool:
         for _ in tqdm(pool.istarmap(process_micrograph, [(micrograph, picker) for micrograph in picker.micrographs]), total=len(picker.micrographs)):
             pass
-    print("Finished successfully.")
+    print("Finished successfully!")
 
 if __name__ == "__main__":
     main()
