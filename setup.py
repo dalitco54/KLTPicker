@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='kltpicker',
-      version='0.1',
+      version='0.8',
       description='KLT picker',
       url='http://github.com/dalitco54/kltpicker',
       author='Dalit Cohen',
@@ -11,18 +11,11 @@ setup(name='kltpicker',
       install_requires=[
           'numpy',
           'mrcfile',
-          'operator',
-          'multiprocessing',
-          'pathlib',
-          'warnings',
-          'sys',
           'argparse',
           'scipy',
-          'matplotlib',
-          'os',
           'pyfftw',
           'tqdm'
       ],
       python_requires='>=3',
-      scripts=['bin/pick.py'],
+      scripts=['bin/KLTPicker.py'],
       zip_safe=False)

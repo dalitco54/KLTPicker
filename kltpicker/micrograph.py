@@ -1,9 +1,9 @@
 import numpy as np
-from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, als_find_min, fftcorrelate
+from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate
 from scipy import signal
 from tqdm import tqdm
 from numpy.matlib import repmat
-from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_mat
+from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_mat, als_find_min
 from scipy.linalg import eigh
 
 # Globals:
