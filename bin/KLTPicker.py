@@ -3,11 +3,12 @@
 from pathlib import Path
 import warnings
 from sys import exit
+from multiprocessing import Pool
 import argparse
-#import matplotlib.pyplot as plt
 import numpy as np
 from kltpicker.kltpicker import KLTPicker
 from kltpicker.util import trig_interpolation
+from kltpicker.kltpicker_input import get_args
 warnings.filterwarnings("ignore")
 
 # Globals:
@@ -21,8 +22,8 @@ MAX_FUN = 400
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_dir', help='Input directory.', default='c:/users/dalit/Documents/uni/year3/shkol_work')
-    parser.add_argument('--output_dir', help='Output directory.', default='c:/users/dalit/Documents/uni/year3/shkol_work')
+    parser.add_argument('--input_dir', help='Input directory.')
+    parser.add_argument('--output_dir', help='Output directory.')
     parser.add_argument('-s', '--particle_size', help='Expected size of particles in pixels.', default=300, type=int)
     parser.add_argument('--num_of_particles',
                         help='Number of particles to pick per micrograph. If set to -1 will pick all particles.',
@@ -42,8 +43,23 @@ def parse_args():
     return args
 
 
+def process_micrograph(picker, micrograph):
+    micrograph.cutoff_filter(picker.patch_size)
+    micrograph.estimate_rpsd(picker.patch_size, picker.max_iter)
+    micrograph.approx_noise_psd = micrograph.approx_noise_psd + np.median(micrograph.approx_noise_psd) / 10
+    micrograph.prewhiten_micrograph()
+    micrograph.estimate_rpsd(picker.patch_size, picker.max_iter)
+    micrograph.psd = np.abs(trig_interpolation(np.pi * micrograph.r.astype('float64'), micrograph.approx_clean_psd,
+                                               picker.rho.astype('float64')))
+    micrograph.construct_klt_templates(picker)
+    num_picked_particles, num_picked_noise = micrograph.detect_particles(picker)
+    return num_picked_particles, num_picked_noise
+
+
 def main():
     args = parse_args()
+    if args.output_dir is None or args.input_dir is None:
+        args.input_dir, args.output_dir, args.particle_size, args.num_of_particles, args.num_of_noise_images = get_args()
     num_files = len(list(Path(args.input_dir).glob("*.mrc")))
     if num_files > 0:
         print("Running on %i files." % len(list(Path(args.input_dir).glob("*.mrc"))))
@@ -58,55 +74,12 @@ def main():
     else:
         print("Skipping preprocessing.")
     picker.get_micrographs()
-    for micrograph in picker.micrographs:
-        print("Processing %s" % micrograph.mrc_name)
-        print("Cutoff filter...")
-        micrograph.cutoff_filter(picker.patch_size)
-        print("Done cutoff filter.\nEstimating RPSD I...")
-        micrograph.estimate_rpsd(picker.patch_size, picker.max_iter)
-        print("Done estimating RPSD I.")
-        # if picker.show_figures:
-        #     plt.figure(1)
-        #     plt.plot(micrograph.r * np.pi, micrograph.approx_clean_psd, label='Approx Clean PSD')
-        #     plt.title('Approx Clean PSD stage I')
-        #     plt.legend()
-        #     plt.show()
-        #     plt.figure(2)
-        #     plt.plot(micrograph.r * np.pi, micrograph.approx_noise_psd, label='Approx Noise PSD')
-        #     plt.title('Approx Noise PSD stage I')
-        #     plt.legend()
-        #     plt.show()
-        micrograph.approx_noise_psd = micrograph.approx_noise_psd + np.median(micrograph.approx_noise_psd) / 10
-        print("Prewhitening...")
-        micrograph.prewhiten_micrograph()
-        print("Done prewhitening.\nEstimating RPSD II...")
-        micrograph.estimate_rpsd(picker.patch_size, picker.max_iter)
-        print("Done estimating RPSD II.\nConstructing KLT templates...")
-        # if picker.show_figures:
-        #     plt.figure(3)
-        #     plt.plot(micrograph.r * np.pi, micrograph.approx_clean_psd, label='Approx Clean PSD')
-        #     plt.title('Approx Clean PSD stage II')
-        #     plt.legend()
-        #     plt.show()
-        #     plt.figure(4)
-        #     plt.plot(micrograph.r * np.pi, micrograph.approx_noise_psd, label='Approx Noise PSD')
-        #     plt.title('Approx Noise PSD stage II')
-        #     plt.legend()
-        #     plt.show()
-        micrograph.psd = np.abs(trig_interpolation(np.pi * micrograph.r.astype('float64'), micrograph.approx_clean_psd,
-                                                   picker.rho.astype('float64')))
-        # if picker.show_figures:
-        #     plt.figure(5)
-        #     plt.plot(picker.rho, micrograph.psd)
-        #     plt.title('Clean Sig Samp at nodes max order %i, percent of eig %f' % (picker.max_order, PERCENT_EIG_FUNC))
-        #     plt.show()
-        micrograph.construct_klt_templates(picker)
-        print("Done constructing KLT templates.\nPicking particles...")
-        num_picked_particles, num_picked_noise = micrograph.detect_particles(picker)
-        print("Picked %i particles and %i noise images from %s.\n\n" % (
-        num_picked_particles, num_picked_noise, micrograph.mrc_name))
+    pool = Pool()
+    res_stats = pool.starmap(process_micrograph, [(micrograph, picker) for micrograph in picker.micrographs])
+    pool.close()
+    pool.join()
+    print(res_stats)
     print("Finished successfully.")
-
 
 if __name__ == "__main__":
     main()
