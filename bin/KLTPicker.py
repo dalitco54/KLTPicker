@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import warnings
+from tqdm import tqdm
+import istarmap
 from sys import exit
 from multiprocessing import Pool
 import argparse
@@ -43,7 +45,7 @@ def parse_args():
     return args
 
 
-def process_micrograph(picker, micrograph):
+def process_micrograph(micrograph, picker):
     micrograph.cutoff_filter(picker.patch_size)
     micrograph.estimate_rpsd(picker.patch_size, picker.max_iter)
     micrograph.approx_noise_psd = micrograph.approx_noise_psd + np.median(micrograph.approx_noise_psd) / 10
@@ -74,11 +76,9 @@ def main():
     else:
         print("Skipping preprocessing.")
     picker.get_micrographs()
-    pool = Pool()
-    res_stats = pool.starmap(process_micrograph, [(micrograph, picker) for micrograph in picker.micrographs])
-    pool.close()
-    pool.join()
-    print(res_stats)
+    with Pool() as pool:
+        for _ in tqdm(pool.istarmap(process_micrograph, [(micrograph, picker) for micrograph in picker.micrographs]), total=len(picker.micrographs)):
+            pass
     print("Finished successfully.")
 
 if __name__ == "__main__":
